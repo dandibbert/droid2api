@@ -10,10 +10,15 @@
 cp .env.example .env
 ```
 
-编辑 `.env` 文件，填入你的 refresh token：
+编辑 `.env` 文件，填入你需要的环境变量，例如：
 
 ```env
+PORT=3000
+AUTH_TOKEN=your_dashboard_password
+FACTORY_API_KEY=
 DROID_REFRESH_KEY=your_actual_refresh_token_here
+SESSION_SECRET=replace-me
+TOKEN_STORE_PATH=/app/data/token-store.json
 ```
 
 ### 2. 使用 Docker Compose 启动
@@ -47,8 +52,14 @@ docker build -t droid2api:latest .
 ```bash
 docker run -d \
   --name droid2api \
-  -p 3000:3000 \
+  -p ${PORT:-3000}:${PORT:-3000} \
+  -e PORT=${PORT:-3000} \
+  -e AUTH_TOKEN="your_dashboard_password" \
+  -e FACTORY_API_KEY="" \
   -e DROID_REFRESH_KEY="your_refresh_token_here" \
+  -e SESSION_SECRET="replace-me" \
+  -e TOKEN_STORE_PATH="/app/data/token-store.json" \
+  -v droid2api-token-store:/app/data \
   droid2api:latest
 ```
 
@@ -77,6 +88,7 @@ docker rm droid2api
    - **Port**: 3000
 4. 添加环境变量：
    - `DROID_REFRESH_KEY`: 你的 refresh token
+   - 如需使用 Dashboard，可额外配置 `AUTH_TOKEN`、`FACTORY_API_KEY` 等
 5. 点击 "Create Web Service"
 
 ### Railway 部署
@@ -87,6 +99,7 @@ docker rm droid2api
 4. Railway 会自动检测 Dockerfile
 5. 添加环境变量：
    - `DROID_REFRESH_KEY`: 你的 refresh token
+   - 根据需要添加 `AUTH_TOKEN`、`FACTORY_API_KEY` 等
 6. 部署完成后会自动分配域名
 
 ### Fly.io 部署
@@ -145,32 +158,25 @@ docker rm droid2api
 
 ## 持久化配置
 
-如果需要持久化刷新的 tokens：
+如果需要持久化 Dashboard 中新增/修改的密钥，保持 `TOKEN_STORE_PATH` 指向一个挂载目录（默认 `/app/data/token-store.json`），并在 Docker 中挂载卷：
 
 ### Docker Compose 方式
 
-修改 `docker-compose.yml`：
-
-```yaml
-services:
-  droid2api:
-    volumes:
-      - auth-data:/app
-      
-volumes:
-  auth-data:
-```
+当前 `docker-compose.yml` 已默认挂载名为 `token-store` 的卷至 `/app/data`，直接运行即可实现持久化。
 
 ### Docker 命令方式
 
 ```bash
-docker volume create droid2api-data
+docker volume create droid2api-token-store
 
 docker run -d \
   --name droid2api \
-  -p 3000:3000 \
+  -p ${PORT:-3000}:${PORT:-3000} \
+  -e PORT=${PORT:-3000} \
+  -e AUTH_TOKEN="your_dashboard_password" \
   -e DROID_REFRESH_KEY="your_refresh_token_here" \
-  -v droid2api-data:/app \
+  -e TOKEN_STORE_PATH="/app/data/token-store.json" \
+  -v droid2api-token-store:/app/data \
   droid2api:latest
 ```
 
@@ -187,7 +193,12 @@ curl http://localhost:3000/v1/models
 
 | 变量名 | 必需 | 说明 |
 |--------|------|------|
-| `DROID_REFRESH_KEY` | 是 | Factory refresh token，用于自动刷新 API key |
+| `PORT` | 否 | 服务监听端口，默认 3000 |
+| `AUTH_TOKEN` | 否 | Dashboard 登录口令，未设置则无法访问管理界面 |
+| `FACTORY_API_KEY` | 否 | 固定 Factory API key，优先级最高 |
+| `DROID_REFRESH_KEY` | 否 | refresh token，支持自动刷新 access token |
+| `SESSION_SECRET` | 否 | Dashboard 会话密钥 |
+| `TOKEN_STORE_PATH` | 否 | token 存储路径，默认 `/app/data/token-store.json` |
 | `NODE_ENV` | 否 | 运行环境，默认 production |
 
 ## 故障排查
