@@ -64,14 +64,17 @@ async function handleChatCompletions(req, res) {
     logInfo(`Routing to ${model.type} endpoint: ${endpoint.base_url}`);
 
     // Get API key (will auto-refresh if needed)
-    let authHeader;
+    let authInfo;
     try {
-      authHeader = await getApiKey(req.headers.authorization);
+      authInfo = await getApiKey(req.headers.authorization);
+      res.locals.tokenInfo = authInfo;
     } catch (error) {
       logError('Failed to get API key', error);
-      return res.status(500).json({ 
+      const statusCode = error.status || 500;
+      return res.status(statusCode).json({
         error: 'API key not available',
-        message: 'Failed to get or refresh API key. Please check server logs.'
+        message: 'Failed to get or refresh API key. Please check server logs.',
+        details: error.message
       });
     }
 
@@ -90,13 +93,13 @@ async function handleChatCompletions(req, res) {
     if (model.type === 'anthropic') {
       transformedRequest = transformToAnthropic(openaiRequest);
       const isStreaming = openaiRequest.stream !== false;
-      headers = getAnthropicHeaders(authHeader, clientHeaders, isStreaming, modelId);
+      headers = getAnthropicHeaders(authInfo.header, clientHeaders, isStreaming, modelId);
     } else if (model.type === 'openai') {
       transformedRequest = transformToOpenAI(openaiRequest);
-      headers = getOpenAIHeaders(authHeader, clientHeaders);
+      headers = getOpenAIHeaders(authInfo.header, clientHeaders);
     } else if (model.type === 'common') {
       transformedRequest = transformToCommon(openaiRequest);
-      headers = getCommonHeaders(authHeader, clientHeaders);
+      headers = getCommonHeaders(authInfo.header, clientHeaders);
     } else {
       return res.status(500).json({ error: `Unknown endpoint type: ${model.type}` });
     }
@@ -207,21 +210,24 @@ async function handleDirectResponses(req, res) {
     logInfo(`Direct forwarding to ${model.type} endpoint: ${endpoint.base_url}`);
 
     // Get API key
-    let authHeader;
+    let authInfo;
     try {
-      authHeader = await getApiKey(req.headers.authorization);
+      authInfo = await getApiKey(req.headers.authorization);
+      res.locals.tokenInfo = authInfo;
     } catch (error) {
       logError('Failed to get API key', error);
-      return res.status(500).json({ 
+      const statusCode = error.status || 500;
+      return res.status(statusCode).json({
         error: 'API key not available',
-        message: 'Failed to get or refresh API key. Please check server logs.'
+        message: 'Failed to get or refresh API key. Please check server logs.',
+        details: error.message
       });
     }
 
     const clientHeaders = req.headers;
-    
+
     // 获取 headers
-    const headers = getOpenAIHeaders(authHeader, clientHeaders);
+    const headers = getOpenAIHeaders(authInfo.header, clientHeaders);
 
     // 注入系统提示到 instructions 字段
     const systemPrompt = getSystemPrompt();
@@ -336,22 +342,25 @@ async function handleDirectMessages(req, res) {
     logInfo(`Direct forwarding to ${model.type} endpoint: ${endpoint.base_url}`);
 
     // Get API key
-    let authHeader;
+    let authInfo;
     try {
-      authHeader = await getApiKey(req.headers.authorization);
+      authInfo = await getApiKey(req.headers.authorization);
+      res.locals.tokenInfo = authInfo;
     } catch (error) {
       logError('Failed to get API key', error);
-      return res.status(500).json({ 
+      const statusCode = error.status || 500;
+      return res.status(statusCode).json({
         error: 'API key not available',
-        message: 'Failed to get or refresh API key. Please check server logs.'
+        message: 'Failed to get or refresh API key. Please check server logs.',
+        details: error.message
       });
     }
 
     const clientHeaders = req.headers;
-    
+
     // 获取 headers
     const isStreaming = anthropicRequest.stream !== false;
-    const headers = getAnthropicHeaders(authHeader, clientHeaders, isStreaming, modelId);
+    const headers = getAnthropicHeaders(authInfo.header, clientHeaders, isStreaming, modelId);
 
     // 注入系统提示到 system 字段
     const systemPrompt = getSystemPrompt();
