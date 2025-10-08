@@ -2,6 +2,7 @@ import express from 'express';
 import { loadConfig, isDevMode, getPort } from './config.js';
 import { logInfo, logError } from './logger.js';
 import router from './routes.js';
+import dashboardRouter from './dashboard.js';
 import { initializeAuth } from './auth.js';
 
 const app = express();
@@ -21,6 +22,7 @@ app.use((req, res, next) => {
 });
 
 app.use(router);
+app.use('/dashboard', dashboardRouter);
 
 app.get('/', (req, res) => {
   res.json({
@@ -32,7 +34,8 @@ app.get('/', (req, res) => {
       'POST /v1/chat/completions',
       'POST /v1/responses',
       'POST /v1/messages'
-    ]
+    ],
+    dashboard: 'GET /dashboard - Dashboard management interface (requires AUTH_TOKEN)'
   });
 });
 
@@ -125,6 +128,7 @@ app.use((err, req, res, next) => {
       logInfo('  POST /v1/chat/completions');
       logInfo('  POST /v1/responses');
       logInfo('  POST /v1/messages');
+      logInfo('  GET  /dashboard - Dashboard (requires AUTH_TOKEN)');
     })
     .on('error', (err) => {
       if (err.code === 'EADDRINUSE') {

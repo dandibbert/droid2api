@@ -3,6 +3,7 @@ import path from 'path';
 import os from 'os';
 import fetch from 'node-fetch';
 import { logDebug, logError, logInfo } from './logger.js';
+import { getAuthToken } from './config.js';
 
 // State management for API key and refresh
 let currentApiKey = null;
@@ -259,6 +260,27 @@ export async function initializeAuth() {
  * @param {string} clientAuthorization - Authorization header from client request (optional)
  */
 export async function getApiKey(clientAuthorization = null) {
+  // Check if client provides AUTH_TOKEN (dashboard access)
+  const dashboardAuthToken = getAuthToken();
+  
+  // If client authorization matches AUTH_TOKEN, use configured tokens
+  if (clientAuthorization && dashboardAuthToken && 
+      clientAuthorization === `Bearer ${dashboardAuthToken}`) {
+    logDebug('Client provided valid AUTH_TOKEN, using configured server tokens');
+    // Fall through to use server-configured tokens
+  } else if (clientAuthorization && dashboardAuthToken && 
+             clientAuthorization.replace(/^Bearer\s+/i, '') === dashboardAuthToken) {
+    logDebug('Client provided valid AUTH_TOKEN (without Bearer), using configured server tokens');
+    // Fall through to use server-configured tokens  
+  } else {
+    // Client doesn't have AUTH_TOKEN or AUTH_TOKEN doesn't match
+    // Use client's own authorization header (透传)
+    if (clientAuthorization) {
+      logDebug('Using client authorization header (passthrough)');
+      return clientAuthorization;
+    }
+  }
+  
   // Priority 1: FACTORY_API_KEY environment variable
   if (authSource === 'factory_key' && factoryApiKey) {
     return `Bearer ${factoryApiKey}`;
@@ -279,12 +301,49 @@ export async function getApiKey(clientAuthorization = null) {
     return `Bearer ${currentApiKey}`;
   }
   
-  // Priority 3: Client authorization header
+  // Fallback: Client authorization header if available
   if (clientAuthorization) {
-    logDebug('Using client authorization header');
+    logDebug('Using client authorization header as fallback');
     return clientAuthorization;
   }
   
   // No authorization available
   throw new Error('No authorization available. Please configure FACTORY_API_KEY, refresh token, or provide client authorization.');
+}
+
+/**
+ * Hot reload tokens by re-initializing auth system
+ */
+export async function reloadTokens() {
+  try {
+    logInfo('Reloading token configuration...');
+    
+    // Reset current state
+    currentApiKey = null;
+    currentRefreshToken = null;
+    lastRefreshTime = null;
+    authSource = null;
+    factoryApiKey = null;
+    
+    // Re-initialize
+    await initializeAuth();
+    
+    logInfo('Token configuration reloaded successfully');
+  } catch (error) {
+    logError('Failed to reload token configuration', error);
+    throw error;
+  }
+}
+
+/**
+ * Get current auth status for dashboard
+ */
+export function getAuthStatus() {
+  return {
+    authSource,
+    hasFactoryApiKey: !!factoryApiKey,
+    hasRefreshToken: !!currentRefreshToken,
+    hasCurrentApiKey: !!currentApiKey,
+    lastRefreshTime: lastRefreshTime ? new Date(lastRefreshTime).toISOString() : null
+  };
 }

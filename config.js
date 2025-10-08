@@ -66,3 +66,17 @@ export function getUserAgent() {
   const cfg = getConfig();
   return cfg.user_agent || 'factory-cli/0.19.3';
 }
+
+export function getAuthToken() {
+  const cfg = getConfig();
+  return process.env.AUTH_TOKEN || cfg.auth_token || '';
+}
+
+export function setAuthToken(token) {
+  const cfg = getConfig();
+  cfg.auth_token = token;
+  
+  // 保存到文件
+  const configPath = path.join(__dirname, 'config.json');
+  fs.writeFileSync(configPath, JSON.stringify(cfg, null, 2), 'utf-8');
+}

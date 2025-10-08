@@ -8,10 +8,12 @@ import { transformToCommon, getCommonHeaders } from './transformers/request-comm
 import { AnthropicResponseTransformer } from './transformers/response-anthropic.js';
 import { OpenAIResponseTransformer } from './transformers/response-openai.js';
 import { getApiKey } from './auth.js';
+import { addRequestLog } from './request-logs.js';
 
 const router = express.Router();
 
 router.get('/v1/models', (req, res) => {
+  const startTime = Date.now();
   logInfo('GET /v1/models');
   
   try {
@@ -31,9 +33,13 @@ router.get('/v1/models', (req, res) => {
       data: models
     };
 
+    const endTime = Date.now();
+    addRequestLog(req, res, startTime, endTime, 200);
     logResponse(200, null, response);
     res.json(response);
   } catch (error) {
+    const endTime = Date.now();
+    addRequestLog(req, res, startTime, endTime, 500, error);
     logError('Error in GET /v1/models', error);
     res.status(500).json({ error: 'Internal server error' });
   }
@@ -41,6 +47,7 @@ router.get('/v1/models', (req, res) => {
 
 // 标准 OpenAI 聊天补全处理函数（带格式转换）
 async function handleChatCompletions(req, res) {
+  const startTime = Date.now();
   logInfo('POST /v1/chat/completions');
   
   try {
@@ -48,16 +55,22 @@ async function handleChatCompletions(req, res) {
     const modelId = openaiRequest.model;
 
     if (!modelId) {
+      const endTime = Date.now();
+      addRequestLog(req, res, startTime, endTime, 400);
       return res.status(400).json({ error: 'model is required' });
     }
 
     const model = getModelById(modelId);
     if (!model) {
+      const endTime = Date.now();
+      addRequestLog(req, res, startTime, endTime, 404);
       return res.status(404).json({ error: `Model ${modelId} not found` });
     }
 
     const endpoint = getEndpointByType(model.type);
     if (!endpoint) {
+      const endTime = Date.now();
+      addRequestLog(req, res, startTime, endTime, 500);
       return res.status(500).json({ error: `Endpoint type ${model.type} not found` });
     }
 
@@ -68,6 +81,8 @@ async function handleChatCompletions(req, res) {
     try {
       authHeader = await getApiKey(req.headers.authorization);
     } catch (error) {
+      const endTime = Date.now();
+      addRequestLog(req, res, startTime, endTime, 500, error);
       logError('Failed to get API key', error);
       return res.status(500).json({ 
         error: 'API key not available',
@@ -98,6 +113,8 @@ async function handleChatCompletions(req, res) {
       transformedRequest = transformToCommon(openaiRequest);
       headers = getCommonHeaders(authHeader, clientHeaders);
     } else {
+      const endTime = Date.now();
+      addRequestLog(req, res, startTime, endTime, 500);
       return res.status(500).json({ error: `Unknown endpoint type: ${model.type}` });
     }
 
@@ -112,8 +129,11 @@ async function handleChatCompletions(req, res) {
     logInfo(`Response status: ${response.status}`);
 
     if (!response.ok) {
+      const endTime = Date.now();
       const errorText = await response.text();
-      logError(`Endpoint error: ${response.status}`, new Error(errorText));
+      const error = new Error(errorText);
+      addRequestLog(req, res, startTime, endTime, response.status, error);
+      logError(`Endpoint error: ${response.status}`, error);
       return res.status(response.status).json({ 
         error: `Endpoint returned ${response.status}`,
         details: errorText 
@@ -153,19 +173,27 @@ async function handleChatCompletions(req, res) {
             res.write(chunk);
           }
           res.end();
+          const endTime = Date.now();
+          addRequestLog(req, res, startTime, endTime, 200);
           logInfo('Stream completed');
         } catch (streamError) {
+          const endTime = Date.now();
+          addRequestLog(req, res, startTime, endTime, 500, streamError);
           logError('Stream error', streamError);
           res.end();
         }
       }
     } else {
       const data = await response.json();
+      const endTime = Date.now();
+      addRequestLog(req, res, startTime, endTime, 200);
       logResponse(200, null, data);
       res.json(data);
     }
 
   } catch (error) {
+    const endTime = Date.now();
+    addRequestLog(req, res, startTime, endTime, 500, error);
     logError('Error in /v1/chat/completions', error);
     res.status(500).json({ 
       error: 'Internal server error',
@@ -176,6 +204,7 @@ async function handleChatCompletions(req, res) {
 
 // 直接转发 OpenAI 请求（不做格式转换）
 async function handleDirectResponses(req, res) {
+  const startTime = Date.now();
   logInfo('POST /v1/responses');
   
   try {
@@ -305,6 +334,7 @@ async function handleDirectResponses(req, res) {
 
 // 直接转发 Anthropic 请求（不做格式转换）
 async function handleDirectMessages(req, res) {
+  const startTime = Date.now();
   logInfo('POST /v1/messages');
   
   try {
