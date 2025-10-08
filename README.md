@@ -53,11 +53,42 @@ npm install
 
 > 💡 **首次使用必须执行 `npm install`**，之后只需要 `npm start` 启动服务即可。
 
+### 环境变量配置
+
+支持使用 `.env` 文件或环境变量直接配置关键参数。先复制示例文件：
+
+```bash
+cp .env.example .env
+```
+
+根据需求修改 `.env` 文件中的值，常用变量说明如下：
+
+| 变量名 | 说明 |
+| ------ | ---- |
+| `PORT` | 服务监听端口，默认 3000 |
+| `SESSION_SECRET` | Dashboard 会话密钥 |
+| `AUTH_TOKEN` | 访问 `/dashboard` 所需的登录口令 |
+| `FACTORY_API_KEY` | 固定的 Factory API key，优先级最高 |
+| `DROID_REFRESH_KEY` | refresh token，支持自动刷新 access token |
+| `TOKEN_STORE_PATH` | Dashboard 持久化 token 文件路径，默认 `./data/token-store.json` |
+
 ## 快速开始
+
+### Dashboard 登录口令
+
+如需使用 `/dashboard` 监控与密钥管理界面，请在 `.env` 或环境变量中配置：
+
+```bash
+AUTH_TOKEN=your_dashboard_password
+```
+
+启动服务后访问 `http://localhost:3000/dashboard`，输入 `AUTH_TOKEN` 即可进入。
 
 ### 1. 配置认证（三种方式）
 
 **优先级：FACTORY_API_KEY > refresh_token > 客户端authorization**
+
+可通过命令行导出或在 `.env` 文件中设置以下变量：
 
 ```bash
 # 方式1：固定API密钥（最高优先级）
@@ -179,17 +210,29 @@ docker build -t droid2api .
 # 运行容器
 docker run -d \
   -p 3000:3000 \
+  -e PORT=3000 \
+  -e AUTH_TOKEN="your_dashboard_password" \
+  -e FACTORY_API_KEY="" \
   -e DROID_REFRESH_KEY="your_refresh_token" \
+  -e SESSION_SECRET="replace-me" \
+  -e TOKEN_STORE_PATH="/app/data/token-store.json" \
+  -v droid2api-token-store:/app/data \
   --name droid2api \
   droid2api
 ```
 
+如需调整端口，可同时修改 `PORT` 环境变量与端口映射，例如 `-p 4000:4000 -e PORT=4000`。
+
 #### 环境变量配置
 
-Docker部署支持以下环境变量：
+Docker 部署同样支持 `.env` 文件，所有变量可在 `docker-compose.yml` 或 `.env` 中设置：
 
-- `DROID_REFRESH_KEY` - 刷新令牌（必需）
-- `PORT` - 服务端口（默认3000）
+- `PORT` - 服务端口（默认 3000）
+- `AUTH_TOKEN` - Dashboard 登录口令
+- `FACTORY_API_KEY` - 固定 Factory API key
+- `DROID_REFRESH_KEY` - refresh token，用于自动刷新 access token
+- `SESSION_SECRET` - Dashboard 会话密钥
+- `TOKEN_STORE_PATH` - token 持久化路径（默认 `/app/data/token-store.json`）
 - `NODE_ENV` - 运行环境（production/development）
 
 ### Claude Code集成
@@ -329,13 +372,18 @@ Token refreshed successfully, expires at: 2025-01-XX XX:XX:XX
 
 ### 如何更改端口？
 
-编辑 `config.json` 中的 `port` 字段：
+可以通过以下两种方式覆盖端口：
 
-```json
-{
-  "port": 8080
-}
-```
+1. 设置环境变量（推荐）：
+   ```bash
+   PORT=8080 npm start
+   ```
+2. 编辑 `config.json` 中的 `port` 字段：
+   ```json
+   {
+     "port": 8080
+   }
+   ```
 
 ### 如何启用调试日志？
 

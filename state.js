@@ -2,7 +2,12 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-const STORE_PATH = path.join(process.cwd(), 'token-store.json');
+const configuredStorePath = process.env.TOKEN_STORE_PATH;
+const STORE_PATH = configuredStorePath
+  ? path.isAbsolute(configuredStorePath)
+    ? configuredStorePath
+    : path.join(process.cwd(), configuredStorePath)
+  : path.join(process.cwd(), 'data', 'token-store.json');
 const FACTORY_AUTH_PATH = path.join(os.homedir(), '.factory', 'auth.json');
 const MAX_LOGS = 100;
 
