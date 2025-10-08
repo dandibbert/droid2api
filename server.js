@@ -35,6 +35,11 @@ app.use((req, res, next) => {
     : Date.now();
 
   res.on('finish', () => {
+    const pathForLog = (req.originalUrl || req.url || '').split('?')[0];
+    if (!pathForLog.startsWith('/v1/')) {
+      return;
+    }
+
     const durationMs = typeof start === 'bigint'
       ? Number(process.hrtime.bigint() - start) / 1e6
       : Date.now() - start;
@@ -46,7 +51,7 @@ app.use((req, res, next) => {
 
     recordRequestLog({
       method: req.method,
-      path: req.originalUrl || req.url,
+      path: pathForLog,
       status: res.statusCode,
       durationMs: Math.round(durationMs * 100) / 100,
       clientIp,
