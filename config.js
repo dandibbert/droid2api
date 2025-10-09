@@ -41,6 +41,12 @@ export function isDevMode() {
 }
 
 export function getPort() {
+  if (process.env.PORT) {
+    const parsed = parseInt(process.env.PORT, 10);
+    if (!Number.isNaN(parsed) && parsed > 0) {
+      return parsed;
+    }
+  }
   const cfg = getConfig();
   return cfg.port || 3000;
 }
@@ -56,7 +62,7 @@ export function getModelReasoning(modelId) {
     return null;
   }
   const reasoningLevel = model.reasoning.toLowerCase();
-  if (['low', 'medium', 'high'].includes(reasoningLevel)) {
+  if (['low', 'medium', 'high', 'auto'].includes(reasoningLevel)) {
     return reasoningLevel;
   }
   return null;
