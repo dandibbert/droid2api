@@ -11,6 +11,44 @@ import { getApiKey } from './auth.js';
 
 const router = express.Router();
 
+/**
+ * Convert a /v1/responses API result to a /v1/chat/completions-compatible format.
+ * Works for non-streaming responses.
+ */
+function convertResponseToChatCompletion(resp) {
+  if (!resp || typeof resp !== 'object') {
+    throw new Error('Invalid response object');
+  }
+
+  const outputMsg = (resp.output || []).find(o => o.type === 'message');
+  const textBlocks = outputMsg?.content?.filter(c => c.type === 'output_text') || [];
+  const content = textBlocks.map(c => c.text).join('');
+
+  const chatCompletion = {
+    id: resp.id ? resp.id.replace(/^resp_/, 'chatcmpl-') : `chatcmpl-${Date.now()}`,
+    object: 'chat.completion',
+    created: resp.created_at || Math.floor(Date.now() / 1000),
+    model: resp.model || 'unknown-model',
+    choices: [
+      {
+        index: 0,
+        message: {
+          role: outputMsg?.role || 'assistant',
+          content: content || ''
+        },
+        finish_reason: resp.status === 'completed' ? 'stop' : 'unknown'
+      }
+    ],
+    usage: {
+      prompt_tokens: resp.usage?.input_tokens ?? 0,
+      completion_tokens: resp.usage?.output_tokens ?? 0,
+      total_tokens: resp.usage?.total_tokens ?? 0
+    }
+  };
+
+  return chatCompletion;
+}
+
 router.get('/v1/models', (req, res) => {
   logInfo('GET /v1/models');
   
@@ -66,7 +104,10 @@ async function handleChatCompletions(req, res) {
     // Get API key (will auto-refresh if needed)
     let authInfo;
     try {
-      authInfo = await getApiKey(req.headers.authorization);
+      const clientAuthFromXApiKey = req.headers['x-api-key']
+        ? `Bearer ${req.headers['x-api-key']}`
+        : null;
+      authInfo = await getApiKey(req.headers.authorization || clientAuthFromXApiKey);
       res.locals.tokenInfo = authInfo;
     } catch (error) {
       logError('Failed to get API key', error);
@@ -92,7 +133,7 @@ async function handleChatCompletions(req, res) {
 
     if (model.type === 'anthropic') {
       transformedRequest = transformToAnthropic(openaiRequest);
-      const isStreaming = openaiRequest.stream !== false;
+      const isStreaming = openaiRequest.stream === true;
       headers = getAnthropicHeaders(authInfo.header, clientHeaders, isStreaming, modelId);
     } else if (model.type === 'openai') {
       transformedRequest = transformToOpenAI(openaiRequest);
@@ -123,7 +164,7 @@ async function handleChatCompletions(req, res) {
       });
     }
 
-    const isStreaming = transformedRequest.stream !== false;
+    const isStreaming = transformedRequest.stream === true;
 
     if (isStreaming) {
       res.setHeader('Content-Type', 'text/event-stream');
@@ -164,8 +205,21 @@ async function handleChatCompletions(req, res) {
       }
     } else {
       const data = await response.json();
-      logResponse(200, null, data);
-      res.json(data);
+      if (model.type === 'openai') {
+        try {
+          const converted = convertResponseToChatCompletion(data);
+          logResponse(200, null, converted);
+          res.json(converted);
+        } catch (e) {
+          // 如果转换失败，回退为原始数据
+          logResponse(200, null, data);
+          res.json(data);
+        }
+      } else {
+        // anthropic/common: 保持现有逻辑，直接转发
+        logResponse(200, null, data);
+        res.json(data);
+      }
     }
 
   } catch (error) {
@@ -209,10 +263,13 @@ async function handleDirectResponses(req, res) {
 
     logInfo(`Direct forwarding to ${model.type} endpoint: ${endpoint.base_url}`);
 
-    // Get API key
+    // Get API key - support client x-api-key for anthropic endpoint
     let authInfo;
     try {
-      authInfo = await getApiKey(req.headers.authorization);
+      const clientAuthFromXApiKey = req.headers['x-api-key']
+        ? `Bearer ${req.headers['x-api-key']}`
+        : null;
+      authInfo = await getApiKey(req.headers.authorization || clientAuthFromXApiKey);
       res.locals.tokenInfo = authInfo;
     } catch (error) {
       logError('Failed to get API key', error);
@@ -244,7 +301,10 @@ async function handleDirectResponses(req, res) {
 
     // 处理reasoning字段
     const reasoningLevel = getModelReasoning(modelId);
-    if (reasoningLevel) {
+    if (reasoningLevel === 'auto') {
+      // Auto模式：保持原始请求的reasoning字段不变
+      // 如果原始请求有reasoning字段就保留，没有就不添加
+    } else if (reasoningLevel && ['low', 'medium', 'high'].includes(reasoningLevel)) {
       modifiedRequest.reasoning = {
         effort: reasoningLevel,
         summary: 'auto'
@@ -274,7 +334,7 @@ async function handleDirectResponses(req, res) {
       });
     }
 
-    const isStreaming = openaiRequest.stream !== false;
+    const isStreaming = openaiRequest.stream === true;
 
     if (isStreaming) {
       // 直接转发流式响应，不做任何转换
@@ -341,10 +401,13 @@ async function handleDirectMessages(req, res) {
 
     logInfo(`Direct forwarding to ${model.type} endpoint: ${endpoint.base_url}`);
 
-    // Get API key
+    // Get API key - support client x-api-key for anthropic endpoint
     let authInfo;
     try {
-      authInfo = await getApiKey(req.headers.authorization);
+      const clientAuthFromXApiKey = req.headers['x-api-key']
+        ? `Bearer ${req.headers['x-api-key']}`
+        : null;
+      authInfo = await getApiKey(req.headers.authorization || clientAuthFromXApiKey);
       res.locals.tokenInfo = authInfo;
     } catch (error) {
       logError('Failed to get API key', error);
@@ -359,7 +422,7 @@ async function handleDirectMessages(req, res) {
     const clientHeaders = req.headers;
 
     // 获取 headers
-    const isStreaming = anthropicRequest.stream !== false;
+    const isStreaming = anthropicRequest.stream === true;
     const headers = getAnthropicHeaders(authInfo.header, clientHeaders, isStreaming, modelId);
 
     // 注入系统提示到 system 字段
@@ -382,7 +445,10 @@ async function handleDirectMessages(req, res) {
 
     // 处理thinking字段
     const reasoningLevel = getModelReasoning(modelId);
-    if (reasoningLevel) {
+    if (reasoningLevel === 'auto') {
+      // Auto模式：保持原始请求的thinking字段不变
+      // 如果原始请求有thinking字段就保留，没有就不添加
+    } else if (reasoningLevel && ['low', 'medium', 'high'].includes(reasoningLevel)) {
       const budgetTokens = {
         'low': 4096,
         'medium': 12288,

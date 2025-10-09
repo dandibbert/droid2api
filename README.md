@@ -11,12 +11,13 @@ OpenAI 兼容的 API 代理服务器，统一访问不同的 LLM 模型。
 - **智能优先级** - FACTORY_API_KEY > refresh_token > 客户端authorization
 - **容错启动** - 无任何认证配置时不报错，继续运行支持客户端授权
 
-### 🧠 模型推理能力级别
-- **四档推理级别** - off/low/medium/high，精确控制模型思考深度
+### 🧠 智能推理级别控制
+- **五档推理级别** - auto/off/low/medium/high，灵活控制推理行为
+- **auto模式** - 完全遵循客户端原始请求，不做任何推理参数修改
+- **固定级别** - off/low/medium/high强制覆盖客户端推理设置
 - **OpenAI模型** - 自动注入reasoning字段，effort参数控制推理强度
 - **Anthropic模型** - 自动配置thinking字段和budget_tokens (4096/12288/24576)
-- **智能Beta头管理** - 自动添加/移除anthropic-beta字段中的推理相关标识
-- **配置驱动** - 通过config.json灵活调整每个模型的推理级别
+- **智能头管理** - 根据推理级别自动添加/移除anthropic-beta相关标识
 
 ### 🚀 服务器部署/Docker部署
 - **本地服务器** - 支持npm start快速启动
@@ -36,7 +37,7 @@ OpenAI 兼容的 API 代理服务器，统一访问不同的 LLM 模型。
 
 - 🎯 **标准 OpenAI API 接口** - 使用熟悉的 OpenAI API 格式访问所有模型
 - 🔄 **自动格式转换** - 自动处理不同 LLM 提供商的格式差异
-- 🌊 **流式响应支持** - 支持实时流式输出
+- 🌊 **智能流式处理** - 完全尊重客户端stream参数，支持流式和非流式响应
 - ⚙️ **灵活配置** - 通过配置文件自定义模型和端点
 
 ## 安装
@@ -134,34 +135,37 @@ export DROID_REFRESH_KEY="your_refresh_token_here"
 
 #### 推理级别配置
 
-每个模型支持四种推理级别：
+每个模型支持五种推理级别：
 
-- **`off`** - 关闭推理功能，使用标准响应
+- **`auto`** - 遵循客户端原始请求，不做任何推理参数修改
+- **`off`** - 强制关闭推理功能，删除所有推理字段
 - **`low`** - 低级推理 (Anthropic: 4096 tokens, OpenAI: low effort)
-- **`medium`** - 中级推理 (Anthropic: 12288 tokens, OpenAI: medium effort)
+- **`medium`** - 中级推理 (Anthropic: 12288 tokens, OpenAI: medium effort) 
 - **`high`** - 高级推理 (Anthropic: 24576 tokens, OpenAI: high effort)
 
 **对于Anthropic模型 (Claude)**：
 ```json
 {
-  "name": "Claude Sonnet 4.5",
+  "name": "Claude Sonnet 4.5", 
   "id": "claude-sonnet-4-5-20250929",
   "type": "anthropic",
-  "reasoning": "high"
+  "reasoning": "auto"  // 推荐：让客户端控制推理
 }
 ```
-自动添加thinking字段和anthropic-beta头，budget_tokens根据级别设置。
+- `auto`: 保留客户端thinking字段，不修改anthropic-beta头
+- `low/medium/high`: 自动添加thinking字段和anthropic-beta头，budget_tokens根据级别设置
 
 **对于OpenAI模型 (GPT)**：
 ```json
 {
-  "name": "GPT-5-Codex",
-  "id": "gpt-5-codex",
-  "type": "openai",
-  "reasoning": "medium"
+  "name": "GPT-5",
+  "id": "gpt-5-2025-08-07",
+  "type": "openai", 
+  "reasoning": "auto"  // 推荐：让客户端控制推理
 }
 ```
-自动添加reasoning字段，effort参数对应配置级别。
+- `auto`: 保留客户端reasoning字段不变
+- `low/medium/high`: 自动添加reasoning字段，effort参数设置为对应级别
 
 ## 使用方法
 
@@ -283,8 +287,7 @@ curl http://localhost:3000/v1/models
 
 #### 对话补全
 
-使用标准 OpenAI 格式调用任何模型：
-
+**流式响应**（实时返回）：
 ```bash
 curl http://localhost:3000/v1/chat/completions \
   -H "Content-Type: application/json" \
@@ -297,10 +300,26 @@ curl http://localhost:3000/v1/chat/completions \
   }'
 ```
 
+**非流式响应**（等待完整结果）：
+```bash
+curl http://localhost:3000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "claude-opus-4-1-20250805",
+    "messages": [
+      {"role": "user", "content": "你好"}
+    ],
+    "stream": false
+  }'
+```
+
 **支持的参数：**
 - `model` - 模型 ID（必需）
 - `messages` - 对话消息数组（必需）
-- `stream` - 是否流式输出（默认 true）
+- `stream` - 流式输出控制（可选）
+  - `true` - 启用流式响应，实时返回内容
+  - `false` - 禁用流式响应，等待完整结果
+  - 未指定 - 由服务器端决定默认行为
 - `max_tokens` - 最大输出长度
 - `temperature` - 温度参数（0-1）
 
@@ -331,6 +350,44 @@ droid2api支持三级授权优先级：
 - **CI/CD流水线** - 稳定的认证，不依赖刷新机制
 - **临时测试** - 快速设置，无需配置refresh_token
 
+### 如何控制流式和非流式响应？
+
+droid2api完全尊重客户端的stream参数设置：
+
+- **`"stream": true`** - 启用流式响应，内容实时返回
+- **`"stream": false`** - 禁用流式响应，等待完整结果后返回
+- **不设置stream** - 由服务器端决定默认行为，不强制转换
+
+### 什么是auto推理模式？
+
+`auto` 是v1.3.0新增的推理级别，完全遵循客户端的原始请求：
+
+**行为特点**：
+- 🎯 **零干预** - 不添加、不删除、不修改任何推理相关字段
+- 🔄 **完全透传** - 客户端发什么就转发什么
+- 🛡️ **头信息保护** - 不修改anthropic-beta等推理相关头信息
+
+**使用场景**：
+- 客户端需要完全控制推理参数
+- 与原始API行为保持100%一致
+- 不同客户端有不同的推理需求
+
+**示例对比**：
+```bash
+# 客户端请求包含推理字段
+{
+  "model": "claude-opus-4-1-20250805",
+  "reasoning": "auto",           // 配置为auto
+  "messages": [...],
+  "thinking": {"type": "enabled", "budget_tokens": 8192}
+}
+
+# auto模式：完全保留客户端设置
+→ thinking字段原样转发，不做任何修改
+
+# 如果配置为"high"：会被覆盖为 {"type": "enabled", "budget_tokens": 24576}
+```
+
 ### 如何配置推理级别？
 
 在 `config.json` 中为每个模型设置 `reasoning` 字段：
@@ -339,13 +396,23 @@ droid2api支持三级授权优先级：
 {
   "models": [
     {
-      "id": "claude-opus-4-1-20250805",
+      "id": "claude-opus-4-1-20250805", 
       "type": "anthropic",
-      "reasoning": "high"  // off/low/medium/high
+      "reasoning": "auto"  // auto/off/low/medium/high
     }
   ]
 }
 ```
+
+**推理级别说明**：
+
+| 级别 | 行为 | 适用场景 |
+|------|------|----------|
+| `auto` | 完全遵循客户端原始请求参数 | 让客户端自主控制推理 |
+| `off` | 强制禁用推理，删除所有推理字段 | 快速响应场景 |
+| `low` | 轻度推理 (4096 tokens) | 简单任务 |
+| `medium` | 中度推理 (12288 tokens) | 平衡性能与质量 |
+| `high` | 深度推理 (24576 tokens) | 复杂任务 |
 
 ### 令牌多久刷新一次？
 
@@ -366,9 +433,19 @@ Token refreshed successfully, expires at: 2025-01-XX XX:XX:XX
 
 ### 推理功能为什么没有生效？
 
-1. 检查模型配置中的 `reasoning` 字段是否设置正确
-2. 确认模型类型匹配（anthropic模型用thinking，openai模型用reasoning）
-3. 查看请求日志确认字段是否正确添加
+**如果推理级别设置无效**：
+1. 检查模型配置中的 `reasoning` 字段是否为有效值 (`auto/off/low/medium/high`)
+2. 确认模型ID是否正确匹配config.json中的配置
+3. 查看服务器日志确认推理字段是否正确处理
+
+**如果使用auto模式但推理不生效**：
+1. 确认客户端请求中包含了推理字段 (`reasoning` 或 `thinking`)
+2. auto模式不会添加推理字段，只会保留客户端原有的设置
+3. 如需强制推理，请改用 `low/medium/high` 级别
+
+**推理字段对应关系**：
+- OpenAI模型 (`gpt-*`) → 使用 `reasoning` 字段
+- Anthropic模型 (`claude-*`) → 使用 `thinking` 字段
 
 ### 如何更改端口？
 
