@@ -7,9 +7,13 @@ export function transformToOpenAI(openaiRequest) {
   const targetRequest = {
     model: openaiRequest.model,
     input: [],
-    store: false,
-    stream: openaiRequest.stream !== false
+    store: false
   };
+
+  // Only add stream parameter if explicitly provided by client
+  if (openaiRequest.stream !== undefined) {
+    targetRequest.stream = openaiRequest.stream;
+  }
 
   // Transform max_tokens to max_output_tokens
   if (openaiRequest.max_tokens) {
@@ -90,22 +94,22 @@ export function transformToOpenAI(openaiRequest) {
 
   // Handle reasoning field based on model configuration
   const reasoningLevel = getModelReasoning(openaiRequest.model);
-  if (reasoningLevel) {
+  if (reasoningLevel === 'auto') {
+    // Auto mode: preserve original request's reasoning field exactly as-is
+    if (openaiRequest.reasoning !== undefined) {
+      targetRequest.reasoning = openaiRequest.reasoning;
+    }
+    // If original request has no reasoning field, don't add one
+  } else if (reasoningLevel && ['low', 'medium', 'high'].includes(reasoningLevel)) {
+    // Specific level: override with model configuration
     targetRequest.reasoning = {
       effort: reasoningLevel,
       summary: 'auto'
     };
-  }
-  // If request already has reasoning field, respect the configuration rule
-  // Remove it if model config is off/invalid, otherwise override with config
-  if (openaiRequest.reasoning) {
-    if (reasoningLevel) {
-      targetRequest.reasoning = {
-        effort: reasoningLevel,
-        summary: 'auto'
-      };
-    }
-    // If reasoningLevel is null (off/invalid), don't add reasoning field
+  } else {
+    // Off or invalid: explicitly remove reasoning field
+    // This ensures any reasoning field from the original request is deleted
+    delete targetRequest.reasoning;
   }
 
   // Pass through other parameters
