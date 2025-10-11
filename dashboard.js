@@ -224,7 +224,12 @@ function renderDashboardPage() {
     <script>
       const state = {
         autoRefresh: true,
-        timer: null
+        timer: null,
+        tokens: null,
+        usageCache: {
+          factory: {},
+          refresh: {}
+        }
       };
 
       const sourceClassMap = {
@@ -253,6 +258,61 @@ function renderDashboardPage() {
           return 'Invalid';
         }
         return date.toISOString().split('T')[0];
+      }
+
+      function getUsageEntry(type, id) {
+        return state.usageCache[type] && state.usageCache[type][id];
+      }
+
+      function setUsageEntry(type, id, entry) {
+        if (!state.usageCache[type]) {
+          state.usageCache[type] = {};
+        }
+        if (entry) {
+          state.usageCache[type][id] = entry;
+        } else if (state.usageCache[type]) {
+          delete state.usageCache[type][id];
+        }
+      }
+
+      function pruneUsageCache(type, list) {
+        const cache = state.usageCache[type];
+        if (!cache) return;
+        const validIds = new Set(list.map((token) => token.id));
+        Object.keys(cache).forEach((id) => {
+          if (!validIds.has(id)) {
+            delete cache[id];
+          }
+        });
+      }
+
+      function formatUsageEntry(entry) {
+        if (!entry) {
+          return '';
+        }
+        if (entry.status === 'loading') {
+          return '正在查询...';
+        }
+        if (entry.status === 'error') {
+          return '查询失败：' + (entry.message || '未知错误');
+        }
+        if (entry.status === 'success' && entry.data) {
+          const usage = entry.data;
+          const fetchedAt = usage.fetchedAt ? new Date(usage.fetchedAt) : new Date();
+          return (
+            '<div><strong>时间范围</strong>' +
+            formatDate(usage.startDate) +
+            ' ~ ' +
+            formatDate(usage.endDate) +
+            '</div>' +
+            '<div><strong>总额度</strong>' + formatNumber(usage.totalAllowance) + '</div>' +
+            '<div><strong>已使用</strong>' + formatNumber(usage.totalUsed) + '</div>' +
+            '<div><strong>剩余额度</strong>' + formatNumber(usage.remaining) + '</div>' +
+            '<div><strong>使用率</strong>' + formatPercentage(usage.usedRatio) + '</div>' +
+            '<div><strong>查询时间</strong>' + fetchedAt.toLocaleString() + '</div>'
+          );
+        }
+        return '';
       }
 
       async function fetchState() {
@@ -328,13 +388,19 @@ function renderDashboardPage() {
           const badge = isActive ? '<span class="badge">使用中</span>' : '';
           const activateDisabled = isActive ? ' disabled' : '';
           const removeDisabled = token.readOnly ? ' disabled' : '';
+          const usageEntry = getUsageEntry(type, token.id);
+          const usageDisplay = usageEntry ? 'block' : 'none';
+          const usageContent = formatUsageEntry(usageEntry);
+          const usageDisabled = usageEntry && usageEntry.status === 'loading' ? ' disabled' : '';
           const usageButton =
             type === 'factory'
               ? '<button type="button" data-action="usage" data-type="' +
                 type +
                 '" data-id="' +
                 token.id +
-                '">查询余量</button>'
+                '"' +
+                usageDisabled +
+                '>查询余量</button>'
               : '';
           li.innerHTML =
             '<div class="token-header">' +
@@ -362,13 +428,22 @@ function renderDashboardPage() {
               usageButton +
             '</div>' +
             (type === 'factory'
-              ? '<div class="token-usage" data-usage-id="' + token.id + '"></div>'
+              ? '<div class="token-usage" data-usage-id="' +
+                token.id +
+                '" style="display:' +
+                usageDisplay +
+                ';">' +
+                usageContent +
+                '</div>'
               : '');
           ul.appendChild(li);
         });
       }
 
       function renderTokens(tokens) {
+        state.tokens = tokens;
+        pruneUsageCache('factory', tokens.factoryKeys || []);
+        pruneUsageCache('refresh', tokens.refreshTokens || []);
         renderTokenList('factory', tokens.factoryKeys, tokens.activeFactoryKeyId);
         renderTokenList('refresh', tokens.refreshTokens, tokens.activeRefreshTokenId);
       }
@@ -472,6 +547,7 @@ function renderDashboardPage() {
         usageBox.style.display = 'block';
         usageBox.textContent = '正在查询...';
         trigger.disabled = true;
+        setUsageEntry(type, id, { status: 'loading' });
         try {
           const response = await fetch('/dashboard/api/tokens/usage', {
             method: 'POST',
@@ -486,19 +562,32 @@ function renderDashboardPage() {
           }
           const usage = payload.usage || {};
           const fetchedAt = usage.fetchedAt ? new Date(usage.fetchedAt) : new Date();
+          const normalizedUsage = {
+            ...usage,
+            fetchedAt: fetchedAt.toISOString()
+          };
           usageBox.innerHTML =
             '<div><strong>时间范围</strong>' +
-            formatDate(usage.startDate) +
+            formatDate(normalizedUsage.startDate) +
             ' ~ ' +
-            formatDate(usage.endDate) +
+            formatDate(normalizedUsage.endDate) +
             '</div>' +
-            '<div><strong>总额度</strong>' + formatNumber(usage.totalAllowance) + '</div>' +
-            '<div><strong>已使用</strong>' + formatNumber(usage.totalUsed) + '</div>' +
-            '<div><strong>剩余额度</strong>' + formatNumber(usage.remaining) + '</div>' +
-            '<div><strong>使用率</strong>' + formatPercentage(usage.usedRatio) + '</div>' +
+            '<div><strong>总额度</strong>' + formatNumber(normalizedUsage.totalAllowance) + '</div>' +
+            '<div><strong>已使用</strong>' + formatNumber(normalizedUsage.totalUsed) + '</div>' +
+            '<div><strong>剩余额度</strong>' + formatNumber(normalizedUsage.remaining) + '</div>' +
+            '<div><strong>使用率</strong>' + formatPercentage(normalizedUsage.usedRatio) + '</div>' +
             '<div><strong>查询时间</strong>' + fetchedAt.toLocaleString() + '</div>';
+          setUsageEntry(type, id, { status: 'success', data: normalizedUsage });
+          if (state.tokens) {
+            renderTokens(state.tokens);
+          }
         } catch (error) {
-          usageBox.textContent = '查询失败：' + (error.message || '未知错误');
+          const message = error && error.message ? error.message : '未知错误';
+          usageBox.textContent = '查询失败：' + message;
+          setUsageEntry(type, id, { status: 'error', message });
+          if (state.tokens) {
+            renderTokens(state.tokens);
+          }
         } finally {
           trigger.disabled = false;
         }
