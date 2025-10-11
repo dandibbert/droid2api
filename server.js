@@ -1,24 +1,80 @@
 import express from 'express';
+import session from 'express-session';
 import { loadConfig, isDevMode, getPort } from './config.js';
 import { logInfo, logError } from './logger.js';
 import router from './routes.js';
 import { initializeAuth } from './auth.js';
+import dashboardRouter from './dashboard.js';
+import { initializeDashboardState, recordRequestLog } from './state.js';
 
 const app = express();
+
+initializeDashboardState();
 
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
+const sessionSecret = process.env.SESSION_SECRET || 'droid2api-dashboard-secret';
+app.use(session({
+  secret: sessionSecret,
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    maxAge: 24 * 60 * 60 * 1000
+  }
+}));
+
+app.use((req, res, next) => {
+  res.locals.tokenInfo = null;
+  next();
+});
+
+app.use((req, res, next) => {
+  const start = typeof process.hrtime.bigint === 'function'
+    ? process.hrtime.bigint()
+    : Date.now();
+
+  res.on('finish', () => {
+    const pathForLog = (req.originalUrl || req.url || '').split('?')[0];
+    if (!pathForLog.startsWith('/v1/')) {
+      return;
+    }
+
+    const durationMs = typeof start === 'bigint'
+      ? Number(process.hrtime.bigint() - start) / 1e6
+      : Date.now() - start;
+    const forwarded = req.headers['x-forwarded-for'];
+    const clientIp = (typeof forwarded === 'string' && forwarded.split(',')[0].trim())
+      || req.ip
+      || req.socket?.remoteAddress
+      || 'N/A';
+
+    recordRequestLog({
+      method: req.method,
+      path: pathForLog,
+      status: res.statusCode,
+      durationMs: Math.round(durationMs * 100) / 100,
+      clientIp,
+      tokenSource: res.locals.tokenInfo?.source || 'none',
+      tokenSnippet: res.locals.tokenInfo?.tokenSnippet
+    });
+  });
+
+  next();
+});
+
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-API-Key, anthropic-version');
   
   if (req.method === 'OPTIONS') {
     return res.sendStatus(200);
   }
   next();
 });
+
+app.use('/dashboard', dashboardRouter);
 
 app.use(router);
 
@@ -115,35 +171,35 @@ app.use((err, req, res, next) => {
     await initializeAuth();
     
     const PORT = getPort();
-  logInfo(`Starting server on port ${PORT}...`);
-  
-  const server = app.listen(PORT)
-    .on('listening', () => {
-      logInfo(`Server running on http://localhost:${PORT}`);
-      logInfo('Available endpoints:');
-      logInfo('  GET  /v1/models');
-      logInfo('  POST /v1/chat/completions');
-      logInfo('  POST /v1/responses');
-      logInfo('  POST /v1/messages');
-    })
-    .on('error', (err) => {
-      if (err.code === 'EADDRINUSE') {
-        console.error(`\n${'='.repeat(80)}`);
-        console.error(`ERROR: Port ${PORT} is already in use!`);
-        console.error('');
-        console.error('Please choose one of the following options:');
-        console.error(`  1. Stop the process using port ${PORT}:`);
-        console.error(`     lsof -ti:${PORT} | xargs kill`);
-        console.error('');
-        console.error('  2. Change the port in config.json:');
-        console.error('     Edit config.json and modify the "port" field');
-        console.error(`${'='.repeat(80)}\n`);
-        process.exit(1);
-      } else {
-        logError('Failed to start server', err);
-        process.exit(1);
-      }
-    });
+    logInfo(`Starting server on port ${PORT}...`);
+
+    const server = app.listen(PORT)
+      .on('listening', () => {
+        logInfo(`Server running on http://localhost:${PORT}`);
+        logInfo('Available endpoints:');
+        logInfo('  GET  /v1/models');
+        logInfo('  POST /v1/chat/completions');
+        logInfo('  POST /v1/responses');
+        logInfo('  POST /v1/messages');
+      })
+      .on('error', (err) => {
+        if (err.code === 'EADDRINUSE') {
+          console.error(`\n${'='.repeat(80)}`);
+          console.error(`ERROR: Port ${PORT} is already in use!`);
+          console.error('');
+          console.error('Please choose one of the following options:');
+          console.error(`  1. Stop the process using port ${PORT}:`);
+          console.error(`     lsof -ti:${PORT} | xargs kill`);
+          console.error('');
+          console.error('  2. Change the port in config.json:');
+          console.error('     Edit config.json and modify the "port" field');
+          console.error(`${'='.repeat(80)}\n`);
+          process.exit(1);
+        } else {
+          logError('Failed to start server', err);
+          process.exit(1);
+        }
+      });
   } catch (error) {
     logError('Failed to start server', error);
     process.exit(1);

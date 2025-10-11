@@ -1,6 +1,6 @@
 {
   "name": "droid2api",
-  "version": "1.2.0",
+  "version": "1.3.1",
   "description": "OpenAI Compatible API Proxy",
   "main": "server.js",
   "type": "module",
@@ -13,6 +13,7 @@
   "license": "MIT",
   "dependencies": {
     "express": "^4.18.2",
+    "express-session": "^1.17.3",
     "node-fetch": "^3.3.2"
   }
 }
