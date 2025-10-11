@@ -267,6 +267,16 @@ export function activateToken(type, id) {
   return getTokenStoreSnapshot();
 }
 
+export function getTokenValue(type, id) {
+  requireInitialization();
+  const collection = type === 'factory' ? tokenStore.factoryKeys : tokenStore.refreshTokens;
+  const token = collection.find((item) => item.id === id);
+  if (!token) {
+    return null;
+  }
+  return { ...token };
+}
+
 export function updateTokenValue(type, id, value) {
   requireInitialization();
   const collection = type === 'factory' ? tokenStore.factoryKeys : tokenStore.refreshTokens;

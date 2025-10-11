@@ -1,13 +1,71 @@
 import express from 'express';
+import fetch from 'node-fetch';
 import { getDashboardAuthToken } from './auth.js';
 import {
   activateToken,
   addToken,
   getDashboardState,
+  getTokenValue,
+  maskToken,
   removeToken
 } from './state.js';
 
 const dashboardRouter = express.Router();
+
+const FACTORY_USAGE_ENDPOINT = 'https://app.factory.ai/api/organization/members/chat-usage';
+
+function normalizeDate(value) {
+  if (!value && value !== 0) {
+    return null;
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+  return date.toISOString();
+}
+
+async function fetchFactoryUsage(tokenValue) {
+  const response = await fetch(FACTORY_USAGE_ENDPOINT, {
+    headers: {
+      Authorization: `Bearer ${tokenValue}`,
+      'User-Agent':
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36'
+    }
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text().catch(() => '');
+    const message = errorBody ? `${response.status} ${errorBody}` : `HTTP ${response.status}`;
+    throw new Error(`Factory API 请求失败：${message}`);
+  }
+
+  const payload = await response.json().catch(() => null);
+  if (!payload || !payload.usage || !payload.usage.standard) {
+    throw new Error('Factory API 返回格式不正确');
+  }
+
+  const usage = payload.usage;
+  const standard = usage.standard;
+  const totalAllowance = Number(standard.totalAllowance || 0);
+  const totalUsed = Number(standard.orgTotalTokensUsed || 0);
+  const remaining = totalAllowance - totalUsed;
+  const usedRatio = typeof standard.usedRatio === 'number'
+    ? standard.usedRatio
+    : totalAllowance > 0
+      ? totalUsed / totalAllowance
+      : 0;
+
+  return {
+    startDate: normalizeDate(usage.startDate),
+    endDate: normalizeDate(usage.endDate),
+    totalAllowance,
+    totalUsed,
+    remaining,
+    usedRatio,
+    fetchedAt: new Date().toISOString()
+  };
+}
 
 function renderLoginPage(errorMessage = '') {
   return `<!DOCTYPE html>
@@ -79,6 +137,8 @@ function renderDashboardPage() {
       .token-actions { display: flex; gap: 8px; }
       .token-actions button { padding: 6px 10px; font-size: 12px; border-radius: 6px; background: rgba(59, 130, 246, 0.2); border: 1px solid rgba(59, 130, 246, 0.35); color: #bfdbfe; cursor: pointer; }
       .token-actions button.danger { background: rgba(239, 68, 68, 0.18); border-color: rgba(239, 68, 68, 0.4); color: #fca5a5; }
+      .token-usage { display: none; margin-top: 10px; padding-top: 8px; border-top: 1px solid rgba(148, 163, 184, 0.15); font-size: 12px; line-height: 1.6; color: #cbd5f5; }
+      .token-usage strong { display: inline-block; min-width: 72px; color: #94a3b8; font-weight: 600; }
       form.inline { display: flex; gap: 12px; margin-top: 16px; }
       form.inline input { flex: 1; padding: 10px 12px; border-radius: 8px; border: 1px solid rgba(148, 163, 184, 0.3); background: rgba(15, 23, 42, 0.5); color: #e2e8f0; }
       form.inline input:focus { outline: none; border-color: #38bdf8; box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.2); }
@@ -174,6 +234,27 @@ function renderDashboardPage() {
         none: 'source-none'
       };
 
+      function formatNumber(value) {
+        const num = Number(value || 0);
+        return num.toLocaleString('en-US');
+      }
+
+      function formatPercentage(value) {
+        const ratio = Number(value || 0);
+        return (ratio * 100).toFixed(2) + '%';
+      }
+
+      function formatDate(value) {
+        if (!value && value !== 0) {
+          return 'N/A';
+        }
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) {
+          return 'Invalid';
+        }
+        return date.toISOString().split('T')[0];
+      }
+
       async function fetchState() {
         const response = await fetch('/dashboard/api/state', { credentials: 'same-origin' });
         if (!response.ok) {
@@ -247,6 +328,14 @@ function renderDashboardPage() {
           const badge = isActive ? '<span class="badge">使用中</span>' : '';
           const activateDisabled = isActive ? ' disabled' : '';
           const removeDisabled = token.readOnly ? ' disabled' : '';
+          const usageButton =
+            type === 'factory'
+              ? '<button type="button" data-action="usage" data-type="' +
+                type +
+                '" data-id="' +
+                token.id +
+                '">查询余量</button>'
+              : '';
           li.innerHTML =
             '<div class="token-header">' +
               '<div>' +
@@ -256,9 +345,25 @@ function renderDashboardPage() {
               badge +
             '</div>' +
             '<div class="token-actions">' +
-              '<button type="button" data-action="activate" data-type="' + type + '" data-id="' + token.id + '"' + activateDisabled + '>设为当前</button>' +
-              '<button type="button" class="danger" data-action="remove" data-type="' + type + '" data-id="' + token.id + '"' + removeDisabled + '>删除</button>' +
-            '</div>';
+              '<button type="button" data-action="activate" data-type="' +
+                type +
+                '" data-id="' +
+                token.id +
+                '"' +
+                activateDisabled +
+                '>设为当前</button>' +
+              '<button type="button" class="danger" data-action="remove" data-type="' +
+                type +
+                '" data-id="' +
+                token.id +
+                '"' +
+                removeDisabled +
+                '>删除</button>' +
+              usageButton +
+            '</div>' +
+            (type === 'factory'
+              ? '<div class="token-usage" data-usage-id="' + token.id + '"></div>'
+              : '');
           ul.appendChild(li);
         });
       }
@@ -356,6 +461,49 @@ function renderDashboardPage() {
       document.getElementById('factory-list').addEventListener('click', onTokenAction);
       document.getElementById('refresh-list').addEventListener('click', onTokenAction);
 
+      async function queryTokenUsage(type, id, trigger) {
+        const hostItem = trigger.closest('.token-item');
+        const usageBox = hostItem
+          ? hostItem.querySelector('.token-usage[data-usage-id="' + id + '"]')
+          : null;
+        if (!usageBox) {
+          return;
+        }
+        usageBox.style.display = 'block';
+        usageBox.textContent = '正在查询...';
+        trigger.disabled = true;
+        try {
+          const response = await fetch('/dashboard/api/tokens/usage', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ type, id })
+          });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            const message = payload && payload.error ? payload.error : '查询失败';
+            throw new Error(message);
+          }
+          const usage = payload.usage || {};
+          const fetchedAt = usage.fetchedAt ? new Date(usage.fetchedAt) : new Date();
+          usageBox.innerHTML =
+            '<div><strong>时间范围</strong>' +
+            formatDate(usage.startDate) +
+            ' ~ ' +
+            formatDate(usage.endDate) +
+            '</div>' +
+            '<div><strong>总额度</strong>' + formatNumber(usage.totalAllowance) + '</div>' +
+            '<div><strong>已使用</strong>' + formatNumber(usage.totalUsed) + '</div>' +
+            '<div><strong>剩余额度</strong>' + formatNumber(usage.remaining) + '</div>' +
+            '<div><strong>使用率</strong>' + formatPercentage(usage.usedRatio) + '</div>' +
+            '<div><strong>查询时间</strong>' + fetchedAt.toLocaleString() + '</div>';
+        } catch (error) {
+          usageBox.textContent = '查询失败：' + (error.message || '未知错误');
+        } finally {
+          trigger.disabled = false;
+        }
+      }
+
       async function onTokenAction(event) {
         const target = event.target;
         if (!(target instanceof HTMLElement)) return;
@@ -364,6 +512,11 @@ function renderDashboardPage() {
         const type = target.getAttribute('data-type');
         const id = target.getAttribute('data-id');
         if (!type || !id) return;
+
+        if (action === 'usage') {
+          await queryTokenUsage(type, id, target);
+          return;
+        }
 
         if (action === 'remove') {
           const response = await fetch('/dashboard/api/tokens/' + type + '/' + id, {
@@ -483,6 +636,33 @@ dashboardRouter.delete('/api/tokens/:type/:id', ensureDashboardAuth, (req, res) 
     return res.json(getDashboardState());
   } catch (error) {
     return res.status(400).json({ error: error.message || '删除失败' });
+  }
+});
+
+dashboardRouter.post('/api/tokens/usage', ensureDashboardAuth, async (req, res) => {
+  const { type, id } = req.body || {};
+  if (!type || !id) {
+    return res.status(400).json({ error: '缺少必要的字段 type 或 id' });
+  }
+  if (type !== 'factory') {
+    return res.status(400).json({ error: '目前仅支持查询 FACTORY_API_KEY 余额' });
+  }
+  const token = getTokenValue(type, id);
+  if (!token) {
+    return res.status(404).json({ error: 'Token 不存在' });
+  }
+  try {
+    const usage = await fetchFactoryUsage(token.value);
+    return res.json({
+      token: {
+        id: token.id,
+        label: token.label,
+        snippet: maskToken(token.value)
+      },
+      usage
+    });
+  } catch (error) {
+    return res.status(502).json({ error: error.message || '查询额度失败' });
   }
 });
 
