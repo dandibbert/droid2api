@@ -89,7 +89,8 @@ app.get('/', (req, res) => {
       'GET /v1/models',
       'POST /v1/chat/completions',
       'POST /v1/responses',
-      'POST /v1/messages'
+      'POST /v1/messages',
+      'POST /v1/messages/count_tokens'
     ]
   });
 });
@@ -148,7 +149,8 @@ app.use((req, res, next) => {
       'GET /v1/models',
       'POST /v1/chat/completions',
       'POST /v1/responses',
-      'POST /v1/messages'
+      'POST /v1/messages',
+      'POST /v1/messages/count_tokens'
     ]
   });
 });
@@ -191,6 +193,7 @@ app.use((err, req, res, next) => {
         logInfo('  POST /v1/chat/completions');
         logInfo('  POST /v1/responses');
         logInfo('  POST /v1/messages');
+        logInfo('  POST /v1/messages/count_tokens');
       })
       .on('error', (err) => {
         if (err.code === 'EADDRINUSE') {

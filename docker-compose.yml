@@ -9,6 +9,8 @@ services:
     env_file:
       - .env
     environment:
+      # Authentication configuration priority: FACTORY_API_KEY > DROID_REFRESH_KEY > client Authorization
+      # 认证配置优先级：FACTORY_API_KEY > DROID_REFRESH_KEY > 客户端 Authorization
       PORT: ${PORT:-3000}
       NODE_ENV: ${NODE_ENV:-production}
       SESSION_SECRET: ${SESSION_SECRET:-change-me-in-production}
