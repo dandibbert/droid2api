@@ -8,6 +8,7 @@ import { transformToCommon, getCommonHeaders } from './transformers/request-comm
 import { AnthropicResponseTransformer } from './transformers/response-anthropic.js';
 import { OpenAIResponseTransformer } from './transformers/response-openai.js';
 import { getApiKey } from './auth.js';
+import { keywordFilter } from './keyword-filter.js';
 
 const router = express.Router();
 
@@ -83,6 +84,22 @@ async function handleChatCompletions(req, res) {
   
   try {
     const openaiRequest = req.body;
+
+    logDebug('=== Original Request (before filter) ===', {
+      model: openaiRequest?.model,
+      messages: openaiRequest?.messages
+    });
+
+    if (keywordFilter.isEnabled()) {
+      logDebug('Keyword filter is ENABLED, applying filters...');
+      keywordFilter.filterRequest(openaiRequest, 'openai');
+      logDebug('=== Request After Filter ===', {
+        model: openaiRequest?.model,
+        messages: openaiRequest?.messages
+      });
+    } else {
+      logDebug('Keyword filter is DISABLED');
+    }
     const modelId = openaiRequest.model;
 
     if (!modelId) {
@@ -237,6 +254,22 @@ async function handleDirectResponses(req, res) {
   
   try {
     const openaiRequest = req.body;
+
+    logDebug('=== Original Request (before filter) ===', {
+      model: openaiRequest?.model,
+      input: openaiRequest?.input
+    });
+
+    if (keywordFilter.isEnabled()) {
+      logDebug('Keyword filter is ENABLED, applying filters...');
+      keywordFilter.filterRequest(openaiRequest, 'responses');
+      logDebug('=== Request After Filter ===', {
+        model: openaiRequest?.model,
+        input: openaiRequest?.input
+      });
+    } else {
+      logDebug('Keyword filter is DISABLED');
+    }
     const modelId = openaiRequest.model;
 
     if (!modelId) {
@@ -375,6 +408,22 @@ async function handleDirectMessages(req, res) {
   
   try {
     const anthropicRequest = req.body;
+
+    logDebug('=== Original Request (before filter) ===', {
+      model: anthropicRequest?.model,
+      messages: anthropicRequest?.messages
+    });
+
+    if (keywordFilter.isEnabled()) {
+      logDebug('Keyword filter is ENABLED, applying filters...');
+      keywordFilter.filterRequest(anthropicRequest, 'anthropic');
+      logDebug('=== Request After Filter ===', {
+        model: anthropicRequest?.model,
+        messages: anthropicRequest?.messages
+      });
+    } else {
+      logDebug('Keyword filter is DISABLED');
+    }
     const modelId = anthropicRequest.model;
 
     if (!modelId) {

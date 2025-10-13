@@ -1,11 +1,13 @@
 import express from 'express';
 import session from 'express-session';
+import path from 'path';
 import { loadConfig, isDevMode, getPort } from './config.js';
 import { logInfo, logError } from './logger.js';
 import router from './routes.js';
 import { initializeAuth } from './auth.js';
 import dashboardRouter from './dashboard.js';
 import { initializeDashboardState, recordRequestLog } from './state.js';
+import { keywordFilter } from './keyword-filter.js';
 
 const app = express();
 
@@ -165,10 +167,18 @@ app.use((err, req, res, next) => {
     loadConfig();
     logInfo('Configuration loaded successfully');
     logInfo(`Dev mode: ${isDevMode()}`);
-    
+
     // Initialize auth system (load and setup API key if needed)
     // This won't throw error if no auth config is found - will use client auth
     await initializeAuth();
+
+    const filterConfigPath = path.resolve(process.cwd(), 'keywords-filter.json');
+    keywordFilter.loadConfig(filterConfigPath);
+    if (keywordFilter.isEnabled()) {
+      logInfo(`Keyword filter: ENABLED (${keywordFilter.getRuleCount()} rules)`);
+    } else {
+      logInfo('Keyword filter: DISABLED');
+    }
     
     const PORT = getPort();
     logInfo(`Starting server on port ${PORT}...`);
